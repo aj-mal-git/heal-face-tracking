@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# Data — do not commit DB, embeddings, snapshots, enrolled photos
+data/db/
+data/faiss/
+data/snapshots/
+data/enrolled_photos/
+
+# InsightFace downloaded models
+~/.insightface/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
