@@ -65,7 +65,7 @@ class StreamProcessor:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name=f"stream-{self._camera_id}")
         self._thread.start()
-        print(f"[StreamProcessor] Started camera '{self._camera_id}' → {self._url}")
+        print(f"[StreamProcessor] Started camera '{self._camera_id}' -> {self._url}")
 
     def stop(self):
         self._running = False
@@ -122,7 +122,26 @@ class StreamProcessor:
                 continue
 
             # ── Full pipeline ──
-            face_results = self._face_engine.detect_and_embed(frame)
+            # Downscale to 720p max before inference — reduces pixel count
+            # while keeping enough detail for face detection at normal distances.
+            h, w = frame.shape[:2]
+            if h > 720:
+                scale = 720 / h
+                small = cv2.resize(frame, (int(w * scale), 720), interpolation=cv2.INTER_LINEAR)
+            else:
+                small = frame
+
+            face_results = self._face_engine.detect_and_embed(small)
+
+            # Scale bboxes back to original frame coords for correct annotation
+            if h > 720:
+                sx, sy = w / small.shape[1], h / small.shape[0]
+                for fr in face_results:
+                    fr.bbox = [
+                        int(fr.bbox[0] * sx), int(fr.bbox[1] * sy),
+                        int(fr.bbox[2] * sx), int(fr.bbox[3] * sy),
+                    ]
+
             tracked_faces = self._tracker.update(face_results, frame, frame_idx)
             recognition_results = self._recognizer.process(tracked_faces, frame_idx)
 

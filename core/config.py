@@ -17,7 +17,7 @@ class Settings:
     db_url: str = os.getenv("DB_URL", "sqlite:///data/db/heal.db")
     api_host: str = os.getenv("API_HOST", "0.0.0.0")
     api_port: int = int(os.getenv("API_PORT", "8000"))
-    frame_skip: int = int(os.getenv("FRAME_SKIP", "2"))
+    frame_skip: int = int(os.getenv("FRAME_SKIP", "4"))
     min_detection_score: float = float(os.getenv("MIN_DETECTION_SCORE", "0.6"))
     min_face_size: int = int(os.getenv("MIN_FACE_SIZE", "60"))
     attendance_log_interval: int = int(os.getenv("ATTENDANCE_LOG_INTERVAL_SECONDS", "5"))

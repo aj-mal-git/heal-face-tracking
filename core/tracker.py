@@ -52,16 +52,17 @@ class TrackerManager:
             self._tracker.update_tracks([], frame=frame)
             return []
 
-        # Build DeepSORT detection list: ([x, y, w, h], confidence, class_id, embedding)
+        # Build DeepSORT detection list: ([x, y, w, h], confidence, class_id)
+        # Embeddings are passed separately via embeds= when no internal embedder is used
         detections = []
+        embeddings = []
         for fr in face_results:
             x1, y1, x2, y2 = fr.bbox
             w, h = x2 - x1, y2 - y1
-            detections.append(
-                ([x1, y1, w, h], fr.det_score, "face", fr.embedding)
-            )
+            detections.append(([x1, y1, w, h], fr.det_score, "face"))
+            embeddings.append(fr.embedding)
 
-        tracks = self._tracker.update_tracks(detections, frame=frame)
+        tracks = self._tracker.update_tracks(detections, embeds=embeddings, frame=frame)
 
         # Match confirmed tracks back to original FaceResults to get embeddings
         tracked_faces = []

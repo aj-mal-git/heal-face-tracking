@@ -1,10 +1,16 @@
 """
 HEAL Face Recognition System — FastAPI Application
+
+Architecture (from spec):
+  CCTV Cameras (RTSP) → StreamManager → FaceEngine (SCRFD + ArcFace) → FAISS Matcher
+  Web Frontend (Streamlit) ↔ FastAPI Backend ↔ Storage (FAISS + SQLite/MySQL)
+
 Run with: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 """
 from contextlib import asynccontextmanager
+import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -12,6 +18,7 @@ from core.config import settings
 from core.database import init_db
 from core.face_engine import get_face_engine
 from core.faiss_store import get_faiss_store
+from core.stream_manager import StreamManager
 from api.routers import employees, streams, events, alerts
 
 
@@ -21,34 +28,36 @@ async def lifespan(app: FastAPI):
     print("[HEAL] Initializing database...")
     init_db()
 
-    print("[HEAL] Loading face recognition model (first run may take ~30s for download)...")
-    get_face_engine()  # warms up InsightFace — loads ONNX model into CUDA/CPU
+    print("[HEAL] Loading face recognition model (buffalo_sc: SCRFD + ArcFace)...")
+    get_face_engine()   # warms up InsightFace — loads ONNX models into CUDA/CPU
 
-    print("[HEAL] Loading Faiss index...")
+    print("[HEAL] Loading FAISS index...")
     store = get_faiss_store()
-    print(f"[HEAL] Faiss index has {store.count()} embeddings.")
+    print(f"[HEAL] FAISS index has {store.count()} enrolled embeddings.")
 
-    app.state.stream_processor = None
+    # Multi-camera stream manager (replaces single stream_processor)
+    app.state.stream_manager = StreamManager()
 
     print(f"[HEAL] API ready at http://{settings.api_host}:{settings.api_port}")
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
-    processor = getattr(app.state, "stream_processor", None)
-    if processor and processor.is_running():
-        print("[HEAL] Stopping stream processor...")
-        processor.stop()
+    print("[HEAL] Stopping all camera streams...")
+    app.state.stream_manager.stop_all()
     print("[HEAL] Shutdown complete.")
 
 
 app = FastAPI(
     title="HEAL Face Recognition API",
-    description="Employee face detection, recognition & tracking for HEAL company CCTV system",
-    version="1.0.0",
+    description=(
+        "Multi-camera employee face detection, recognition & tracking. "
+        "Architecture: CCTV RTSP → SCRFD detector → ArcFace embedder → FAISS matcher."
+    ),
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# Allow dashboard (Streamlit) to call the API from different port
+# Allow Streamlit dashboard (different port) to call the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,34 +66,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount snapshot images as static files
-import os
+# Serve snapshot face-crop images as static files
 os.makedirs(settings.snapshot_dir, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=settings.snapshot_dir), name="snapshots")
 
-# Include routers
+# Routers
 app.include_router(employees.router, prefix="/api/employees", tags=["Employees"])
-app.include_router(streams.router, prefix="/api/streams", tags=["Streams"])
-app.include_router(events.router, prefix="/api/events", tags=["Events"])
-app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
+app.include_router(streams.router,   prefix="/api/streams",   tags=["Streams"])
+app.include_router(events.router,    prefix="/api/events",    tags=["Events"])
+app.include_router(alerts.router,    prefix="/api/alerts",    tags=["Alerts"])
 
 
 @app.get("/")
 def root():
     return {
         "service": "HEAL Face Recognition System",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "docs": "/docs",
         "status": "running",
+        "architecture": "SCRFD + ArcFace (buffalo_sc) + FAISS",
     }
 
 
 @app.get("/health")
-def health():
+def health(request: "Request"):  # noqa: F821
+    from fastapi import Request
     store = get_faiss_store()
-    processor = app.state.stream_processor
+    manager = request.app.state.stream_manager
     return {
         "status": "ok",
         "enrolled_faces": store.count(),
-        "stream_active": processor is not None and processor.is_running(),
+        "active_cameras": manager.count(),
+        "streams": manager.list_active(),
     }

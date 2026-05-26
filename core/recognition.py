@@ -71,27 +71,44 @@ class RecognitionPipeline:
         return results
 
     def _recognize(self, tf: TrackedFace) -> RecognitionResult:
-        matches = self._faiss.search(tf.embedding, top_k=1)
+        # Cast a wide net — fetch top 20 matches across all stored embeddings.
+        # An employee enrolled with N angle-photos has N rows in FAISS,
+        # so we may get multiple hits for the same person.
+        matches = self._faiss.search(tf.embedding, top_k=20)
 
-        if matches and matches[0][1] >= self._threshold:
-            employee_id, similarity = matches[0]
-            name = self._get_employee_name(employee_id)
+        if not matches:
+            return RecognitionResult(
+                track_id=tf.track_id, bbox=tf.bbox,
+                employee_id=None, name="Unknown",
+                confidence=0.0, is_unknown=True,
+            )
+
+        # Aggregate: group by employee_id, keep MAX similarity per employee.
+        # This means "best matching angle" wins — robust to partial views.
+        best_per_emp: dict[int, float] = {}
+        for emp_id, sim in matches:
+            if emp_id not in best_per_emp or sim > best_per_emp[emp_id]:
+                best_per_emp[emp_id] = sim
+
+        # Pick the employee with the highest max similarity
+        best_id = max(best_per_emp, key=best_per_emp.get)
+        best_score = best_per_emp[best_id]
+
+        if best_score >= self._threshold:
+            name = self._get_employee_name(best_id)
             return RecognitionResult(
                 track_id=tf.track_id,
                 bbox=tf.bbox,
-                employee_id=employee_id,
-                name=name or f"Employee #{employee_id}",
-                confidence=similarity,
+                employee_id=best_id,
+                name=name or f"Employee #{best_id}",
+                confidence=best_score,
                 is_unknown=False,
             )
         else:
             return RecognitionResult(
-                track_id=tf.track_id,
-                bbox=tf.bbox,
-                employee_id=None,
-                name="Unknown",
-                confidence=matches[0][1] if matches else 0.0,
-                is_unknown=True,
+                track_id=tf.track_id, bbox=tf.bbox,
+                employee_id=None, name="Unknown",
+                confidence=best_score, is_unknown=True,
             )
 
     def _get_employee_name(self, employee_id: int) -> Optional[str]:

@@ -43,13 +43,41 @@ class FaissStore:
             print("[FaissStore] Created new empty index.")
 
     def add(self, employee_id: int, embedding: np.ndarray):
-        """Add an employee's face embedding to the index."""
+        """
+        Add one face embedding for an employee.
+        Call multiple times with different angle photos to build a gallery.
+        Multiple rows in FAISS can map to the same employee_id.
+        """
         with self._lock:
             vec = self._normalize(embedding)
             row_id = self._index.ntotal
             self._index.add(vec)
             self._id_map[row_id] = employee_id
             self._persist()
+
+    def add_many(self, employee_id: int, embeddings: list) -> int:
+        """
+        Add multiple embeddings for one employee in one call (bulk enrollment).
+        Returns the number of embeddings successfully added.
+        """
+        added = 0
+        with self._lock:
+            for emb in embeddings:
+                if emb is None:
+                    continue
+                vec = self._normalize(emb)
+                row_id = self._index.ntotal
+                self._index.add(vec)
+                self._id_map[row_id] = employee_id
+                added += 1
+            if added:
+                self._persist()
+        return added
+
+    def count_for_employee(self, employee_id: int) -> int:
+        """Return how many embeddings are stored for a given employee."""
+        with self._lock:
+            return sum(1 for eid in self._id_map.values() if eid == employee_id)
 
     def search(
         self, embedding: np.ndarray, top_k: int = 1
